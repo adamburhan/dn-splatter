@@ -175,7 +175,7 @@ def run_monocular_normals(
         omnidata_pretrained_weights_path / "omnidata_dpt_normal_v2.ckpt"
     )
     model = DPTDepthModel(backbone="vitb_rn50_384", num_channels=3)  # DPT Hybrid
-    checkpoint = torch.load(omnidata_pretrained_weights_path, map_location=map_location)
+    checkpoint = torch.load(omnidata_pretrained_weights_path, map_location=map_location, weights_only=False)
     if "state_dict" in checkpoint:
         state_dict = {}
         for k, v in checkpoint["state_dict"].items():
@@ -308,7 +308,7 @@ def normals_from_pretrain(
         omnidata_pretrained_weights_path / "omnidata_dpt_normal_v2.ckpt"
     )
     model = DPTDepthModel(backbone="vitb_rn50_384", num_channels=3)  # DPT Hybrid
-    checkpoint = torch.load(omnidata_pretrained_weights_path, map_location=map_location)
+    checkpoint = torch.load(omnidata_pretrained_weights_path, map_location=map_location, weights_only=False)
     if "state_dict" in checkpoint:
         state_dict = {}
         for k, v in checkpoint["state_dict"].items():

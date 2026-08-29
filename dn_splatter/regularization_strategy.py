@@ -176,6 +176,29 @@ class DNRegularization(RegularizationStrategy):
                 mono_depth_loss_pearson + self.depth_lambda * mono_depth_loss_local
             )
 
+        elif self.depth_loss_type in (
+            DepthLossType.MaskedLogL1,
+            DepthLossType.BimodalLogL1,
+        ):
+            assert "hyp_band" in kwargs, (
+                "MaskedLogL1/BimodalLogL1 require cached hypothesis maps "
+                "(killtest/hyp_extract.py) next to the depth dir"
+            )
+            band = kwargs["hyp_band"] > 0.5
+            if self.depth_loss_type == DepthLossType.MaskedLogL1:
+                depth_loss = self.depth_loss(
+                    pred_depth, gt_depth.float(), valid_gt_mask, band
+                )
+            else:
+                depth_loss = self.depth_loss(
+                    pred_depth,
+                    gt_depth.float(),
+                    valid_gt_mask,
+                    band,
+                    kwargs["hyp_d_fg"],
+                    kwargs["hyp_d_bg"],
+                    kwargs["hyp_degenerate"] > 0.5,
+                )
         else:
             depth_loss = self.depth_loss(
                 pred_depth[valid_gt_mask], gt_depth[valid_gt_mask].float()

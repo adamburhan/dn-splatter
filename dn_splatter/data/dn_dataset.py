@@ -5,6 +5,7 @@ InputDataset that loads various Depth formats and Normal formats
 from pathlib import Path
 from typing import Dict, Literal, Optional, Union
 
+import cv2
 import numpy as np
 import torch
 from dn_splatter.utils.camera_utils import euclidean_to_z_depth
@@ -151,6 +152,30 @@ class GDataset(InputDataset):
                     )
 
                 depth_data.update({"sensor_depth": depth_image})
+
+                # cached bimodal hypothesis maps (killtest/hyp_extract.py):
+                # sibling dir of the depth dir, same stem. Loaded only if present.
+                hyp_path = (
+                    Path(filepath).parent.parent
+                    / "bimodal_hyp"
+                    / (Path(filepath).stem + ".npz")
+                )
+                if hyp_path.exists():
+                    hyp = np.load(hyp_path)
+                    for key, arr, scale in [
+                        ("hyp_band", hyp["band"], 1.0),
+                        ("hyp_degenerate", hyp["degenerate"], 1.0),
+                        ("hyp_d_fg", hyp["d_fg"], scale_factor),
+                        ("hyp_d_bg", hyp["d_bg"], scale_factor),
+                    ]:
+                        arr = arr.astype(np.float32)
+                        if arr.shape[:2] != (height, width):
+                            arr = cv2.resize(
+                                arr, (width, height), interpolation=cv2.INTER_NEAREST
+                            )
+                        depth_data.update(
+                            {key: torch.from_numpy(arr * scale).unsqueeze(-1)}
+                        )
 
             if self.depth_mode in ["mono", "all"]:
                 assert self.mono_depth_filenames is not None

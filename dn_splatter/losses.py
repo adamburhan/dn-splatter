@@ -30,6 +30,8 @@ class DepthLossType(Enum):
     PearsonDepth = "PearsonDepth"
     LocalPearsonDepthLoss = "LocalPearsonDepthLoss"
     AdaptiveDepth = "AdaptiveDepth"
+    MaskedLogL1 = "MaskedLogL1"
+    BimodalLogL1 = "BimodalLogL1"
 
 
 class DepthLoss(nn.Module):
@@ -66,6 +68,10 @@ class DepthLoss(nn.Module):
             return LocalPearsonDepthLoss(**self.kwargs)
         elif self.depth_loss_type == DepthLossType.AdaptiveDepth:
             return AdaptiveDepth(**self.kwargs)
+        elif self.depth_loss_type == DepthLossType.MaskedLogL1:
+            return MaskedLogL1(**self.kwargs)
+        elif self.depth_loss_type == DepthLossType.BimodalLogL1:
+            return BimodalLogL1(**self.kwargs)
         else:
             raise ValueError(f"Unsupported loss type: {self.depth_loss_type}")
 
@@ -222,6 +228,58 @@ class EdgeAwareLogL1(nn.Module):
 
         if self.implementation == "scalar":
             return loss_x.mean() + loss_y.mean()
+
+
+class MaskedLogL1(nn.Module):
+    """Unimodal LogL1 with depth supervision removed inside the prior's edge band.
+
+    Normalized by the count of ALL valid pixels (not only supervised ones) so the
+    per-pixel loss scale matches the unimodal LogL1 arm exactly; arms differ only
+    in where loss mass exists, not in the denominator.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(self, pred: Tensor, gt: Tensor, valid: Tensor, band: Tensor):
+        px = torch.log(1 + torch.abs(pred - gt))
+        keep = valid & ~band
+        return px[keep].sum() / valid.sum().clamp(min=1)
+
+
+class BimodalLogL1(nn.Module):
+    """Two-hypothesis LogL1 at depth discontinuities.
+
+    Inside the prior's edge band, where the local fg/bg gap is meaningful, the
+    per-pixel loss is min(LogL1(pred, d_fg), LogL1(pred, d_bg)) over the two
+    surface hypotheses extracted from the prior's local structure — rendered
+    depth may commit to either physical surface but pays for phantom
+    intermediate values. Elsewhere (and where degenerate) it is the ordinary
+    unimodal LogL1 against the prior. Same normalization as the unimodal arm
+    (mean over valid pixels).
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(
+        self,
+        pred: Tensor,
+        gt: Tensor,
+        valid: Tensor,
+        band: Tensor,
+        d_fg: Tensor,
+        d_bg: Tensor,
+        degenerate: Tensor,
+    ):
+        px_uni = torch.log(1 + torch.abs(pred - gt))
+        px_bi = torch.minimum(
+            torch.log(1 + torch.abs(pred - d_fg)),
+            torch.log(1 + torch.abs(pred - d_bg)),
+        )
+        use_bi = band & ~degenerate & (d_fg > 0) & (d_bg > 0)
+        px = torch.where(use_bi, px_bi, px_uni)
+        return px[valid].sum() / valid.sum().clamp(min=1)
 
 
 class HuberL1(nn.Module):
