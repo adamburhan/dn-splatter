@@ -55,8 +55,27 @@ def loss_descent():
     g = pred2.grad
     assert g[band].abs().max() == 0, "masked arm leaks gradient into band"
     assert g[~band].abs().max() > 0
+    # soft mixture: must still escape the phantom middle, and asymmetric side
+    # mass must break the tie toward the heavier mode
+    from dn_splatter.losses import SoftBimodalLogL1
+
+    pi = torch.full((H, W, 1), 0.8)  # fg-heavy windows
+    pred3 = torch.full((H, W, 1), 3.0, requires_grad=True)  # exact midpoint
+    soft = SoftBimodalLogL1(tau=0.1)
+    opt3 = torch.optim.Adam([pred3], lr=0.05)
+    for _ in range(400):
+        opt3.zero_grad()
+        loss = soft(pred3, gt, valid, band, d_fg, d_bg, degen, pi)
+        assert torch.isfinite(loss), "soft loss not finite"
+        loss.backward()
+        opt3.step()
+    p3 = pred3.detach()[band]
+    dist3 = torch.minimum((p3 - 2.0).abs(), (p3 - 4.0).abs())
+    assert dist3.max() < 0.15, f"soft: band pixels stuck mid: {dist3.max()}"
+    frac_fg = ((p3 - 2.0).abs() < (p3 - 4.0).abs()).float().mean()
+    assert frac_fg > 0.5, f"soft: pi=0.8 fg did not break midpoint tie ({frac_fg})"
     print(f"LOSS_DESCENT_OK  band range [{in_band.min():.2f},{in_band.max():.2f}], "
-          f"masked band grad = 0")
+          f"masked band grad = 0, soft frac_fg={frac_fg:.2f}")
 
 
 def dataloader_check(scene: Path, out: Path):

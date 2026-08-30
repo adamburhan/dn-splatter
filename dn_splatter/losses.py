@@ -32,6 +32,7 @@ class DepthLossType(Enum):
     AdaptiveDepth = "AdaptiveDepth"
     MaskedLogL1 = "MaskedLogL1"
     BimodalLogL1 = "BimodalLogL1"
+    SoftBimodalLogL1 = "SoftBimodalLogL1"
 
 
 class DepthLoss(nn.Module):
@@ -72,6 +73,8 @@ class DepthLoss(nn.Module):
             return MaskedLogL1(**self.kwargs)
         elif self.depth_loss_type == DepthLossType.BimodalLogL1:
             return BimodalLogL1(**self.kwargs)
+        elif self.depth_loss_type == DepthLossType.SoftBimodalLogL1:
+            return SoftBimodalLogL1(**self.kwargs)
         else:
             raise ValueError(f"Unsupported loss type: {self.depth_loss_type}")
 
@@ -279,6 +282,52 @@ class BimodalLogL1(nn.Module):
         )
         use_bi = band & ~degenerate & (d_fg > 0) & (d_bg > 0)
         px = torch.where(use_bi, px_bi, px_uni)
+        return px[valid].sum() / valid.sum().clamp(min=1)
+
+
+class SoftBimodalLogL1(nn.Module):
+    """Soft two-hypothesis mixture at depth discontinuities.
+
+    Inside the band the per-pixel loss is the scaled negative log-likelihood of
+    a two-component Laplace-style mixture over the surface hypotheses,
+
+        L = -tau * log( pi_f * exp(-L_f/tau) + pi_b * exp(-L_b/tau) ),
+
+    with L_f/L_b the LogL1 residuals against d_fg/d_bg and pi_f the side mass
+    of the local inverse-depth window (pi_fg from hyp_extract.py). As tau -> 0
+    this recovers the hard min(); finite tau keeps both modes alive so a wrong
+    early commitment stays recoverable. Elsewhere unimodal LogL1; same
+    normalization as the other arms. tau overridable via env DN_SOFT_TAU.
+    """
+
+    def __init__(self, tau: float = 0.1, **kwargs):
+        super().__init__()
+        import os
+
+        self.tau = float(os.environ.get("DN_SOFT_TAU", tau))
+
+    def forward(
+        self,
+        pred: Tensor,
+        gt: Tensor,
+        valid: Tensor,
+        band: Tensor,
+        d_fg: Tensor,
+        d_bg: Tensor,
+        degenerate: Tensor,
+        pi_fg: Tensor,
+    ):
+        px_uni = torch.log(1 + torch.abs(pred - gt))
+        l_f = torch.log(1 + torch.abs(pred - d_fg))
+        l_b = torch.log(1 + torch.abs(pred - d_bg))
+        pi = pi_fg.clamp(0.05, 0.95)  # keep both modes alive
+        px_soft = -self.tau * torch.logsumexp(
+            torch.stack([torch.log(pi) - l_f / self.tau,
+                         torch.log(1 - pi) - l_b / self.tau]),
+            dim=0,
+        )
+        use_bi = band & ~degenerate & (d_fg > 0) & (d_bg > 0)
+        px = torch.where(use_bi, px_soft, px_uni)
         return px[valid].sum() / valid.sum().clamp(min=1)
 
 

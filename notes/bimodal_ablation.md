@@ -99,3 +99,34 @@ directionally on the tuning scene). Honest framing for the paper:
   `dn_splatter/{losses,regularization_strategy,dn_model,data/dn_dataset}.py`.
 - Eval-infrastructure note: one earlier corrupted eval (coffee_room bimodal, eval raced the
   renderer) was detected and recomputed; the daemon now gates on training-DONE markers.
+
+## Update 2026-08-30: 10-scene scale-up (Mila P1) revises the verdict
+
+39/49 runs of the Mila sweep (all 10 MuSHRoom scenes x {nodepth, native, mask,
+hard_multihyp}, seed 0 complete on 7 scenes; 10 tasks lost to a gsplat JIT race, resubmit
+pending). The phase-2 rule still passes on its letter, but two negatives emerge at scale:
+
+- Band depth **median** improves under bimodal vs masked on 7/7 scenes (0.205 -> 0.186)
+  and phantom-middle is best-of-all-arms on 7/7 (0.187, below nodepth). Off-band identical
+  across depth arms (clean intervention). Depth arms also beat nodepth on full-image LPIPS.
+- **Band depth p90 regresses**: worst of four arms (1.458 vs mask 1.335), worse than mask
+  on 7/7; wrong-commit rises to 0.273. Median down + p90 up = the distributional
+  fingerprint of hard mode selection (wrong commitments carry the full fg/bg gap).
+- **Band RGB "tie with mask" eroded**: mask edges bimodal on band PSNR (-0.16 dB mean,
+  6/7 scenes) and band SSIM; band LPIPS still favors bimodal 7/7 (sharp-but-shifted
+  boundary signature).
+- Band-width sensitivity (koivu, 4px): clean negative. All depth arms sit ~0.7 dB below
+  nodepth on koivu band RGB regardless of band handling -> harm is not band-local.
+- DA2 (metric-hypersim, median-aligned per frame ~0.56-0.73): ambiguity structure present
+  in mono depth too (band err 4.2-4.7x off-band, fly 24-26%, offsets 3-6.6px).
+
+## Pre-registered decision rule: soft mixture (decisive experiment)
+
+Arm `soft` = SoftBimodalLogL1: L = -tau*log(pi_f*exp(-L_f/tau) + pi_b*exp(-L_b/tau)),
+pi_f = side mass of the local inverse-depth window (pi_fg in bimodal_hyp npz, clamped
+[0.05,0.95]), tau = 0.1 (env DN_SOFT_TAU). tau->0 recovers the hard min.
+
+**Soft wins iff, vs masked on the same scenes: band depth p90 <= masked's AND
+wrong-commit <= masked's, while retaining bimodal's band depth median margin and its
+phantom-middle win.** Registered before any soft training results were seen
+(runs launched 2026-08-30 on snoopy: koivu, coffee_room, vr_room).

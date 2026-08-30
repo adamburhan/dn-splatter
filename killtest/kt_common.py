@@ -8,6 +8,7 @@ Conventions:
   nerfstudio's get_depth_image_from_path (cv2.INTER_NEAREST).
 """
 
+import os
 from pathlib import Path
 
 import cv2
@@ -169,9 +170,11 @@ def mushroom_frames(scene_dir: Path, capture: str = "long_capture"):
     for img in images:
         stem = img.stem
         sensor = base / "depth" / f"{stem}.png"
-        mono = base / "mono_depth" / f"{stem}_aligned.npy"
+        # KT_MONO_DIR selects an alternative mono-depth source (e.g. mono_depth_dav2)
+        mono_dir = os.environ.get("KT_MONO_DIR", "mono_depth")
+        mono = base / mono_dir / f"{stem}_aligned.npy"
         if not mono.exists():
-            mono = base / "mono_depth" / f"{stem}.npy"
+            mono = base / mono_dir / f"{stem}.npy"
         ref = base / "reference_depth" / f"{stem}.png"
         frames.append(
             {

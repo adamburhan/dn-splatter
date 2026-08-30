@@ -179,6 +179,7 @@ class DNRegularization(RegularizationStrategy):
         elif self.depth_loss_type in (
             DepthLossType.MaskedLogL1,
             DepthLossType.BimodalLogL1,
+            DepthLossType.SoftBimodalLogL1,
         ):
             assert "hyp_band" in kwargs, (
                 "MaskedLogL1/BimodalLogL1 require cached hypothesis maps "
@@ -188,6 +189,21 @@ class DNRegularization(RegularizationStrategy):
             if self.depth_loss_type == DepthLossType.MaskedLogL1:
                 depth_loss = self.depth_loss(
                     pred_depth, gt_depth.float(), valid_gt_mask, band
+                )
+            elif self.depth_loss_type == DepthLossType.SoftBimodalLogL1:
+                assert "hyp_pi_fg" in kwargs, (
+                    "SoftBimodalLogL1 requires pi_fg maps; re-run "
+                    "killtest/hyp_extract.py (side-mass extraction)"
+                )
+                depth_loss = self.depth_loss(
+                    pred_depth,
+                    gt_depth.float(),
+                    valid_gt_mask,
+                    band,
+                    kwargs["hyp_d_fg"],
+                    kwargs["hyp_d_bg"],
+                    kwargs["hyp_degenerate"] > 0.5,
+                    kwargs["hyp_pi_fg"],
                 )
             else:
                 depth_loss = self.depth_loss(

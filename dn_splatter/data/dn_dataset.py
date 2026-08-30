@@ -2,6 +2,7 @@
 InputDataset that loads various Depth formats and Normal formats
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Literal, Optional, Union
 
@@ -155,19 +156,23 @@ class GDataset(InputDataset):
 
                 # cached bimodal hypothesis maps (killtest/hyp_extract.py):
                 # sibling dir of the depth dir, same stem. Loaded only if present.
+                # DN_HYP_DIR selects an alternative extraction (e.g. 4px band).
                 hyp_path = (
                     Path(filepath).parent.parent
-                    / "bimodal_hyp"
+                    / os.environ.get("DN_HYP_DIR", "bimodal_hyp")
                     / (Path(filepath).stem + ".npz")
                 )
                 if hyp_path.exists():
                     hyp = np.load(hyp_path)
-                    for key, arr, scale in [
+                    keys = [
                         ("hyp_band", hyp["band"], 1.0),
                         ("hyp_degenerate", hyp["degenerate"], 1.0),
                         ("hyp_d_fg", hyp["d_fg"], scale_factor),
                         ("hyp_d_bg", hyp["d_bg"], scale_factor),
-                    ]:
+                    ]
+                    if "pi_fg" in hyp:  # older extractions lack side mass
+                        keys.append(("hyp_pi_fg", hyp["pi_fg"], 1.0))
+                    for key, arr, scale in keys:
                         arr = arr.astype(np.float32)
                         if arr.shape[:2] != (height, width):
                             arr = cv2.resize(

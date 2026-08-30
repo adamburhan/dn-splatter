@@ -49,7 +49,12 @@ def windowed_inv_percentiles(depth: torch.Tensor, win: int):
     lo_hi = torch.nanquantile(patches, q, dim=-1)  # [2,H,W]: p10(inv), p90(inv)
     d_bg = 1.0 / lo_hi[0].clamp(min=1e-6)  # far
     d_fg = 1.0 / lo_hi[1].clamp(min=1e-6)  # near
-    return d_fg, d_bg
+    # side mass: fraction of valid window samples on the near side of the
+    # inverse-depth midpoint -> mixture weight pi_fg for the soft bimodal loss
+    mid = 0.5 * (lo_hi[0] + lo_hi[1])
+    n_valid = torch.isfinite(patches).sum(-1).clamp(min=1)
+    pi_fg = (patches > mid.unsqueeze(-1)).sum(-1) / n_valid  # nan > x is False
+    return d_fg, d_bg, pi_fg
 
 
 def extract_one(depth: torch.Tensor, source: str, win: int):
@@ -57,7 +62,7 @@ def extract_one(depth: torch.Tensor, source: str, win: int):
     band_def = CONFIG["hyp_band_def"][source]
     edge = EDGE_DEFS[band_def](depth)
     band = dilate(edge, CONFIG["hyp_band_dilation"])
-    d_fg, d_bg = windowed_inv_percentiles(depth, win)
+    d_fg, d_bg, pi_fg = windowed_inv_percentiles(depth, win)
     gap = d_bg - d_fg
     meaningful = (gap > CONFIG["min_gap_abs"]) | (gap > CONFIG["min_gap_rel"] * d_fg)
     degenerate = ~(meaningful & torch.isfinite(gap))
@@ -66,6 +71,7 @@ def extract_one(depth: torch.Tensor, source: str, win: int):
         "d_fg": torch.nan_to_num(d_fg, nan=0.0),
         "d_bg": torch.nan_to_num(d_bg, nan=0.0),
         "degenerate": degenerate,
+        "pi_fg": torch.nan_to_num(pi_fg, nan=0.5),
     }
 
 
@@ -135,12 +141,16 @@ def main():
     ap.add_argument("--source", choices=["sensor", "mono"], default="sensor")
     ap.add_argument("--win", type=int, default=None)
     ap.add_argument("--out-name", default="bimodal_hyp")
+    ap.add_argument("--dilation", type=int, default=None,
+                    help="override hyp_band_dilation (px), e.g. 4 for sensitivity")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--viz-only", action="store_true")
     ap.add_argument("--viz-out", type=Path, default=None)
     ap.add_argument("--n-viz", type=int, default=5)
     args = ap.parse_args()
 
+    if args.dilation is not None:
+        CONFIG["hyp_band_dilation"] = args.dilation
     if args.selftest:
         selftest()
         return
@@ -175,6 +185,7 @@ def main():
             degenerate=maps["degenerate"].cpu().numpy().astype(np.uint8),
             d_fg=(maps["d_fg"].cpu().numpy() * 1000.0).astype(np.float32),  # mm
             d_bg=(maps["d_bg"].cpu().numpy() * 1000.0).astype(np.float32),  # mm
+            pi_fg=maps["pi_fg"].cpu().numpy().astype(np.float16),  # side mass
         )
         if (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(frames)}")

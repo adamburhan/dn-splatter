@@ -35,6 +35,17 @@ case $arm in
   bimodal)
     depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type BimodalLogL1 --pipeline.model.depth-lambda 0.2"
     ;;
+  soft)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type SoftBimodalLogL1 --pipeline.model.depth-lambda 0.2"
+    ;;
+  masked4px)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type MaskedLogL1 --pipeline.model.depth-lambda 0.2"
+    export DN_HYP_DIR=bimodal_hyp_4px
+    ;;
+  bimodal4px)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type BimodalLogL1 --pipeline.model.depth-lambda 0.2"
+    export DN_HYP_DIR=bimodal_hyp_4px
+    ;;
   *)
     echo "unknown arm: $arm"; exit 1
     ;;
