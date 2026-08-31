@@ -38,6 +38,18 @@ case $arm in
   soft)
     depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type SoftBimodalLogL1 --pipeline.model.depth-lambda 0.2"
     ;;
+  soft03)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type SoftBimodalLogL1 --pipeline.model.depth-lambda 0.2"
+    export DN_SOFT_TAU=0.3
+    ;;
+  soft05)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type SoftBimodalLogL1 --pipeline.model.depth-lambda 0.2"
+    export DN_SOFT_TAU=0.5
+    ;;
+  multihyp_mv)
+    depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type MultiHypLogL1 --pipeline.model.depth-lambda 0.2"
+    export DN_HYP_DIR=bimodal_hyp_mv
+    ;;
   masked4px)
     depth_flags="--pipeline.model.use-depth-loss True --pipeline.model.depth-loss-type MaskedLogL1 --pipeline.model.depth-lambda 0.2"
     export DN_HYP_DIR=bimodal_hyp_4px

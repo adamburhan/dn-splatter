@@ -695,7 +695,7 @@ class DNSplatterModel(SplatfactoModel):
         # cached bimodal hypothesis maps (loaded by GDataset when present)
         if "hyp_band" in batch:
             for key in ["hyp_band", "hyp_degenerate", "hyp_d_fg", "hyp_d_bg",
-                        "hyp_pi_fg"]:
+                        "hyp_pi_fg", "hyp_d_all"]:
                 if key in batch:
                     additional_data[key] = self.get_gt_img(batch[key])
 

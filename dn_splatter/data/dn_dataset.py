@@ -165,22 +165,25 @@ class GDataset(InputDataset):
                 if hyp_path.exists():
                     hyp = np.load(hyp_path)
                     keys = [
-                        ("hyp_band", hyp["band"], 1.0),
-                        ("hyp_degenerate", hyp["degenerate"], 1.0),
-                        ("hyp_d_fg", hyp["d_fg"], scale_factor),
-                        ("hyp_d_bg", hyp["d_bg"], scale_factor),
+                        ("hyp_band", "band", 1.0),
+                        ("hyp_degenerate", "degenerate", 1.0),
+                        ("hyp_d_fg", "d_fg", scale_factor),
+                        ("hyp_d_bg", "d_bg", scale_factor),
+                        ("hyp_pi_fg", "pi_fg", 1.0),
+                        ("hyp_d_all", "d_hyp", scale_factor),  # [H,W,K] mm
                     ]
-                    if "pi_fg" in hyp:  # older extractions lack side mass
-                        keys.append(("hyp_pi_fg", hyp["pi_fg"], 1.0))
-                    for key, arr, scale in keys:
-                        arr = arr.astype(np.float32)
+                    for key, src_key, scale in keys:
+                        if src_key not in hyp:
+                            continue
+                        arr = hyp[src_key].astype(np.float32)
                         if arr.shape[:2] != (height, width):
                             arr = cv2.resize(
                                 arr, (width, height), interpolation=cv2.INTER_NEAREST
                             )
-                        depth_data.update(
-                            {key: torch.from_numpy(arr * scale).unsqueeze(-1)}
-                        )
+                        t = torch.from_numpy(arr * scale)
+                        if t.ndim == 2:
+                            t = t.unsqueeze(-1)
+                        depth_data.update({key: t})
 
             if self.depth_mode in ["mono", "all"]:
                 assert self.mono_depth_filenames is not None

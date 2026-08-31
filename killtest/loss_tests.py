@@ -74,8 +74,25 @@ def loss_descent():
     assert dist3.max() < 0.15, f"soft: band pixels stuck mid: {dist3.max()}"
     frac_fg = ((p3 - 2.0).abs() < (p3 - 4.0).abs()).float().mean()
     assert frac_fg > 0.5, f"soft: pi=0.8 fg did not break midpoint tie ({frac_fg})"
+    # multi-hyp: K candidates (two real plateaus + one invalid slot) must
+    # behave like bimodal on the synthetic edge
+    from dn_splatter.losses import MultiHypLogL1
+
+    d_hyp = torch.cat([d_fg, d_bg, torch.zeros_like(d_fg)], dim=-1)  # [H,W,3]
+    pred4 = torch.full((H, W, 1), 3.01, requires_grad=True)
+    mh = MultiHypLogL1()
+    opt4 = torch.optim.Adam([pred4], lr=0.05)
+    for _ in range(400):
+        opt4.zero_grad()
+        loss = mh(pred4, gt, valid, band, d_hyp, degen)
+        assert torch.isfinite(loss), "multihyp loss not finite"
+        loss.backward()
+        opt4.step()
+    p4 = pred4.detach()[band]
+    dist4 = torch.minimum((p4 - 2.0).abs(), (p4 - 4.0).abs())
+    assert dist4.max() < 0.1, f"multihyp: band pixels stuck mid: {dist4.max()}"
     print(f"LOSS_DESCENT_OK  band range [{in_band.min():.2f},{in_band.max():.2f}], "
-          f"masked band grad = 0, soft frac_fg={frac_fg:.2f}")
+          f"masked band grad = 0, soft frac_fg={frac_fg:.2f}, multihyp ok")
 
 
 def dataloader_check(scene: Path, out: Path):

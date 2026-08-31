@@ -33,6 +33,7 @@ class DepthLossType(Enum):
     MaskedLogL1 = "MaskedLogL1"
     BimodalLogL1 = "BimodalLogL1"
     SoftBimodalLogL1 = "SoftBimodalLogL1"
+    MultiHypLogL1 = "MultiHypLogL1"
 
 
 class DepthLoss(nn.Module):
@@ -75,6 +76,8 @@ class DepthLoss(nn.Module):
             return BimodalLogL1(**self.kwargs)
         elif self.depth_loss_type == DepthLossType.SoftBimodalLogL1:
             return SoftBimodalLogL1(**self.kwargs)
+        elif self.depth_loss_type == DepthLossType.MultiHypLogL1:
+            return MultiHypLogL1(**self.kwargs)
         else:
             raise ValueError(f"Unsupported loss type: {self.depth_loss_type}")
 
@@ -328,6 +331,37 @@ class SoftBimodalLogL1(nn.Module):
         )
         use_bi = band & ~degenerate & (d_fg > 0) & (d_bg > 0)
         px = torch.where(use_bi, px_soft, px_uni)
+        return px[valid].sum() / valid.sum().clamp(min=1)
+
+
+class MultiHypLogL1(nn.Module):
+    """K-hypothesis min-LogL1 at depth discontinuities.
+
+    Generalizes BimodalLogL1 from two hypotheses to a candidate set d_hyp
+    [H,W,K] (0 = invalid candidate; here K=6, the multi-view union from
+    killtest/hyp_extract_mv.py): inside the band the per-pixel loss is
+    min_k LogL1(pred, d_k). Same fallback/normalization as the other arms.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def forward(
+        self,
+        pred: Tensor,
+        gt: Tensor,
+        valid: Tensor,
+        band: Tensor,
+        d_hyp: Tensor,
+        degenerate: Tensor,
+    ):
+        px_uni = torch.log(1 + torch.abs(pred - gt))
+        px_k = torch.log(1 + torch.abs(pred - d_hyp))
+        px_k = torch.where(d_hyp > 0, px_k, torch.full_like(px_k, torch.inf))
+        px_multi = px_k.min(dim=-1, keepdim=True).values
+        has_cand = (d_hyp > 0).any(dim=-1, keepdim=True)
+        use_multi = band & ~degenerate & has_cand
+        px = torch.where(use_multi, px_multi, px_uni)
         return px[valid].sum() / valid.sum().clamp(min=1)
 
 

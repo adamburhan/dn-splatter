@@ -193,3 +193,96 @@ def subsample(frames, max_n):
         return frames
     idx = np.linspace(0, len(frames) - 1, max_n).round().astype(int)
     return [frames[i] for i in idx]
+
+
+# ------------------------------------------- two-sided hypothesis extraction
+
+
+def two_sided_hypotheses(depth: torch.Tensor, band: torch.Tensor,
+                         r_min: int = 3, r_max: int = 8):
+    """Edge-normal two-sided sampling: for each band pixel, walk along +/- the
+    depth-edge normal (direction of grad log D, box-blurred so it is defined
+    across the dilated band), skip the mixed pixels (r < r_min), take the
+    median valid depth on each side, and return (d_fg, d_bg) = (min, max) of
+    the two side medians. Unlike the windowed-percentile extractor this asks
+    for the surface immediately on EACH side of THIS edge, not two extreme
+    depth populations somewhere in a square window.
+
+    depth [H,W] meters; band bool [H,W]. Returns (d_fg, d_bg, ok) full-size
+    maps: nan outside band or where a side had no valid samples; ok = band
+    pixels with both sides valid.
+    """
+    H, W = depth.shape
+    v = valid_mask(depth)
+    logd = torch.where(v, torch.log(depth.clamp(min=1e-6)), torch.nan)
+    gx = F.pad(logd[:, 1:] - logd[:, :-1], (0, 1), value=torch.nan)
+    gy = F.pad(logd[1:, :] - logd[:-1, :], (0, 0, 0, 1), value=torch.nan)
+    gx = torch.nan_to_num(gx, nan=0.0)
+    gy = torch.nan_to_num(gy, nan=0.0)
+    k = 5  # spread direction over the dilated band
+    gx = F.avg_pool2d(gx.view(1, 1, H, W), k, 1, k // 2).view(H, W)
+    gy = F.avg_pool2d(gy.view(1, 1, H, W), k, 1, k // 2).view(H, W)
+    mag = torch.sqrt(gx**2 + gy**2).clamp(min=1e-12)
+    nx, ny = gx / mag, gy / mag  # (col, row) components of the edge normal
+
+    ys, xs = torch.nonzero(band, as_tuple=True)
+    n_dir_x, n_dir_y = nx[ys, xs], ny[ys, xs]
+    sides = []
+    for sign in (-1.0, 1.0):
+        samples = []
+        for r in range(r_min, r_max + 1):
+            yy = (ys + sign * r * n_dir_y).round().long().clamp(0, H - 1)
+            xx = (xs + sign * r * n_dir_x).round().long().clamp(0, W - 1)
+            d = torch.where(v[yy, xx], depth[yy, xx],
+                            torch.full_like(depth[yy, xx], torch.nan))
+            samples.append(d)
+        sides.append(torch.nanmedian(torch.stack(samples), dim=0).values)
+    d_lo = torch.minimum(sides[0], sides[1])  # nan if either side empty
+    d_hi = torch.maximum(sides[0], sides[1])
+
+    d_fg = torch.full((H, W), torch.nan, dtype=depth.dtype)
+    d_bg = torch.full((H, W), torch.nan, dtype=depth.dtype)
+    d_fg[ys, xs] = d_lo
+    d_bg[ys, xs] = d_hi
+    ok = band & torch.isfinite(d_fg) & torch.isfinite(d_bg)
+    return d_fg, d_bg, ok
+
+
+def kmeans2_hypotheses(depth: torch.Tensor, band: torch.Tensor,
+                       win: int = None, iters: int = 8):
+    """2-means in inverse depth over the same window as the percentile
+    extractor, initialized at its p10/p90: cluster MODES instead of tail
+    quantiles. Returns (d_fg, d_bg, ok) full-size maps (nan/False off band).
+    """
+    win = win or CONFIG["hyp_window"]
+    H, W = depth.shape
+    v = valid_mask(depth)
+    inv = torch.where(v, 1.0 / depth.clamp(min=1e-6), torch.nan)
+    pad = win // 2
+    patches = F.pad(inv.view(1, 1, H, W), (pad,) * 4, value=torch.nan)
+    patches = patches.unfold(2, win, 1).unfold(3, win, 1).reshape(H, W, win * win)
+    ys, xs = torch.nonzero(band, as_tuple=True)
+    p = patches[ys, xs]  # [N, win*win]
+    finite = torch.isfinite(p)
+    q = torch.tensor([CONFIG["hyp_fg_percentile"] / 100.0,
+                      CONFIG["hyp_bg_percentile"] / 100.0], dtype=p.dtype)
+    lo_hi = torch.nanquantile(p, q, dim=-1)  # [2,N]: low inv (far), high inv (near)
+    c_lo, c_hi = lo_hi[0], lo_hi[1]
+    for _ in range(iters):
+        mid = 0.5 * (c_lo + c_hi)
+        hi_m = finite & (p > mid.unsqueeze(-1))
+        lo_m = finite & ~hi_m
+
+        def cmean(m):
+            return torch.where(m, p, torch.zeros_like(p)).sum(-1) / m.sum(-1).clamp(min=1)
+
+        c_hi = torch.where(hi_m.any(-1), cmean(hi_m), c_hi)
+        c_lo = torch.where(lo_m.any(-1), cmean(lo_m), c_lo)
+    d_fg_b = 1.0 / c_hi.clamp(min=1e-6)  # high inverse depth = near
+    d_bg_b = 1.0 / c_lo.clamp(min=1e-6)
+    d_fg = torch.full((H, W), torch.nan, dtype=depth.dtype)
+    d_bg = torch.full((H, W), torch.nan, dtype=depth.dtype)
+    d_fg[ys, xs] = d_fg_b
+    d_bg[ys, xs] = d_bg_b
+    ok = band & torch.isfinite(d_fg) & torch.isfinite(d_bg)
+    return d_fg, d_bg, ok

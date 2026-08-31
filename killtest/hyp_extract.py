@@ -117,7 +117,7 @@ def viz(scene: Path, capture: str, source: str, win: int, out: Path, n: int):
         band = (maps["band"] & ~maps["degenerate"]).cpu().numpy()
         over = rgb.numpy().copy()
         over[band] = [1.0, 0.1, 0.1]
-        fig, ax = plt.subplots(1, 4, figsize=(17, 4.2))
+        fig, ax = plt.subplots(1, 5, figsize=(21, 4.2))
         ax[0].imshow(over); ax[0].set_title("rgb + active band")
         dm = depth.cpu().numpy()
         vmax = np.percentile(dm[dm > 0], 98)
@@ -126,6 +126,14 @@ def viz(scene: Path, capture: str, source: str, win: int, out: Path, n: int):
         ax[2].set_title("d_fg (near hyp)")
         ax[3].imshow(maps["d_bg"].cpu().numpy(), cmap="turbo", vmin=0, vmax=vmax)
         ax[3].set_title("d_bg (far hyp)")
+        # hypothesis separation on the active band only (cm): where the two
+        # local surface hypotheses actually diverge
+        gap_cm = (maps["d_bg"] - maps["d_fg"]).cpu().numpy() * 100.0
+        gap_cm = np.where(band, gap_cm, np.nan)
+        im = ax[4].imshow(gap_cm, cmap="magma", vmin=0,
+                          vmax=np.nanpercentile(gap_cm, 95) if band.any() else 1)
+        ax[4].set_title("band gap |d_bg - d_fg| (cm)")
+        fig.colorbar(im, ax=ax[4], fraction=0.03)
         for a in ax:
             a.set_xticks([]); a.set_yticks([])
         fig.tight_layout()
