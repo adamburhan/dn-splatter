@@ -60,20 +60,22 @@ def depth_eval_faro(data: Path, path_to_faro: Path):
     long_num_frames = len(long_depth_list)
     short_num_frames = len(short_depth_list)
 
-    mse_score_batch = []
-    abs_rel_score_batch = []
-    sq_rel_score_batch = []
-    rmse_score_batch = []
-    rmse_log_score_batch = []
-    a1_score_batch = []
-    a2_score_batch = []
-    a3_score_batch = []
-
     CONSOLE.print(
         f"[bold green]Batchifying and evaluating a total of {long_num_frames + short_num_frames} depth frames"
     )
 
     def calculate_metrics(num_frames, depth_list, capture_mode):
+        # These accumulate per call. Hoisting them out of this function (as upstream did)
+        # leaks the long-capture batches into the short-capture result.
+        mse_score_batch = []
+        abs_rel_score_batch = []
+        sq_rel_score_batch = []
+        rmse_score_batch = []
+        rmse_log_score_batch = []
+        a1_score_batch = []
+        a2_score_batch = []
+        a3_score_batch = []
+
         for batch_index in track(range(0, num_frames, BATCH_SIZE)):
             CONSOLE.print(
                 f"[bold yellow]Evaluating batch {batch_index // BATCH_SIZE} / {num_frames//BATCH_SIZE}"
