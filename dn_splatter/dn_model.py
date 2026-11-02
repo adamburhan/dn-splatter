@@ -848,8 +848,9 @@ class DNSplatterModel(SplatfactoModel):
 
         if "mask" in batch:
             mask = batch["mask"].to(self.device)
-            gt_rgb = gt_rgb * mask
-            predicted_rgb = predicted_rgb * mask
+            rgb_mask = torch.moveaxis(mask, -1, 0)[None, ...]
+            gt_rgb = gt_rgb * rgb_mask
+            predicted_rgb = predicted_rgb * rgb_mask
 
         psnr = self.psnr(gt_rgb, predicted_rgb)
         ssim = self.ssim(gt_rgb, predicted_rgb)
@@ -874,8 +875,13 @@ class DNSplatterModel(SplatfactoModel):
             gt_depth = gt_depth.to(torch.float32)  # it is in float64 previous
 
             if "mask" in batch:
-                gt_depth = gt_depth * mask
-                predicted_depth = predicted_depth * mask
+                depth_mask = TF.resize(
+                    mask.permute(2, 0, 1),
+                    gt_depth.shape[:2],
+                    interpolation=TF.InterpolationMode.NEAREST,
+                ).permute(1, 2, 0)
+                gt_depth = gt_depth * depth_mask
+                predicted_depth = predicted_depth * depth_mask
 
             # add depth eval metrics
 
